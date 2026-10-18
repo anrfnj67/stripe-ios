@@ -22,17 +22,46 @@ jobs:
       - name: Toolchain
         run: |
           xcodebuild -version
-          ruby --version
-          bundle --version
+          xcrun simctl list runtimes
 
-      - name: Bundle install
-        run: bundle install --jobs 4 --retry 3
+      - name: Create simulator (any available iOS runtime)
+        run: |
+          set -euo pipefail
+          RUNTIME_ID=$(xcrun simctl list runtimes --json | python3 -c "
+          import json, sys
+          runtimes = json.load(sys.stdin).get('runtimes', [])
+          ios = [r for r in runtimes if r.get('isAvailable') and r.get('platform') == 'iOS']
+          if not ios:
+              sys.exit('no available iOS runtime on runner')
+          print(ios[-1]['identifier'])
+          ")
+          DEVICE_TYPE=$(xcrun simctl list devicetypes --json | python3 -c "
+          import json, sys
+          types = json.load(sys.stdin).get('devicetypes', [])
+          iphones = [t for t in types if t.get('productFamily') == 'iPhone']
+          print(iphones[-1]['identifier'])
+          ")
+          echo "Using runtime=$RUNTIME_ID deviceType=$DEVICE_TYPE"
+          UDID=$(xcrun simctl create "PoC iPhone" "$DEVICE_TYPE" "$RUNTIME_ID")
+          echo "Created simulator $UDID"
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b || true
 
       - name: Run PoC test
+        shell: bash
         run: |
-          bundle exec ruby ci_scripts/run_tests.rb \
-            --test StripeFinancialConnectionsLiteTests/FCLiteInstantDebitsForgedReturnURLTests \
-            --verbose 2>&1 | tee poc_run.log
+          set -euo pipefail
+          xcodebuild test \
+            -workspace Stripe.xcworkspace \
+            -scheme StripeFinancialConnectionsLite \
+            -destination "id=${UDID},arch=arm64" \
+            -only-testing:StripeFinancialConnectionsLiteTests/FCLiteInstantDebitsForgedReturnURLTests \
+            -resultBundlePath poc.xcresult \
+            SWIFT_SUPPRESS_WARNINGS=YES SWIFT_TREAT_WARNINGS_AS_ERRORS=NO \
+            | tee poc_run.log
+          echo "--- evidence gate ---"
+          grep -E "\[PoC\] (PASS|completion fired)" poc_run.log
 
       - name: Upload evidence
         if: always()
@@ -41,5 +70,5 @@ jobs:
           name: poc-evidence
           path: |
             poc_run.log
-            *.xcresult
+            poc.xcresult
           if-no-files-found: warn
