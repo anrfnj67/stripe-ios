@@ -38,8 +38,15 @@ jobs:
           DEVICE_TYPE=$(xcrun simctl list devicetypes --json | python3 -c "
           import json, sys
           types = json.load(sys.stdin).get('devicetypes', [])
-          iphones = [t for t in types if t.get('productFamily') == 'iPhone']
-          print(iphones[-1]['identifier'])
+          phones = [t for t in types if 'iPhone' in t.get('identifier', '')]
+          if not phones:
+              sys.exit('no iPhone devicetypes on runner')
+          for pref in ['iPhone-16', 'iPhone-15', 'iPhone-14', 'iPhone-13', 'iPhone-12']:
+              for t in phones:
+                  if pref in t['identifier']:
+                      print(t['identifier'])
+                      raise SystemExit
+          print(phones[-1]['identifier'])
           ")
           echo "Using runtime=$RUNTIME_ID deviceType=$DEVICE_TYPE"
           UDID=$(xcrun simctl create "PoC iPhone" "$DEVICE_TYPE" "$RUNTIME_ID")
