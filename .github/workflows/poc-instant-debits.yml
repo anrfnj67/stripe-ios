@@ -1,0 +1,45 @@
+# PoC runner for bug bounty report /reports/4119988
+# (instant-debits forged return-URL acceptance, stripe-ios @ 1b2376b647)
+#
+# Executes FCLiteInstantDebitsForgedReturnURLTests on a macOS runner:
+# real WKWebView + real network navigation to a loopback origin whose document
+# forges stripe-auth://link-accounts/success?... completion query parameters.
+name: poc-instant-debits-forged-return-url
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [poc/instant-debits-forged-return-url]
+
+jobs:
+  poc:
+    name: Forged return-URL PoC test
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          ruby --version
+          bundle --version
+
+      - name: Bundle install
+        run: bundle install --jobs 4 --retry 3
+
+      - name: Run PoC test
+        run: |
+          bundle exec ruby ci_scripts/run_tests.rb \
+            --test StripeFinancialConnectionsLiteTests/FCLiteInstantDebitsForgedReturnURLTests \
+            --verbose 2>&1 | tee poc_run.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: poc-evidence
+          path: |
+            poc_run.log
+            *.xcresult
+          if-no-files-found: warn
